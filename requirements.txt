@@ -1,0 +1,6 @@
+duka==0.2.0
+numpy
+pandas
+sklearn
+keras==2.4.3
+optuna==2.3.0
