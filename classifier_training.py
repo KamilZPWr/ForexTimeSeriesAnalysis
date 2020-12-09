@@ -1,3 +1,4 @@
+import json
 from functools import partial
 
 import numpy as np
@@ -98,13 +99,15 @@ if __name__ == "__main__":
     optimization_function = partial(objective, data=hourly_data)
     study.optimize(optimization_function, n_trials=1000, timeout=604800)
 
-    print("Number of finished trials: {}".format(len(study.trials)))
-
-    print("Best trial:")
     trial = study.best_trial
 
-    print("  Value: {}".format(trial.value))
+    results = {
+        'trials_n': len(study.trials),
+        'trial_value': trial.value,
+        'trial_params': trial.params
+    }
 
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print("    {}: {}".format(key, value))
+    print(results)
+
+    with open('best_trial.json', 'w+') as file:
+        json.dump(results, file)
