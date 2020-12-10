@@ -3,10 +3,10 @@ from functools import partial
 
 import numpy as np
 import optuna
+from optuna.integration import TFKerasPruningCallback
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.layers import BatchNormalization, LSTM, Dropout, Dense
 from tensorflow.python.keras.models import Sequential
-from keras.optimizers import Adam
 import pandas as pd
 
 from preprocessing import slice_column
@@ -87,7 +87,14 @@ def objective(trial, data):
         metrics=['accuracy']
     )
 
-    model.fit(x_train, y_train, epochs=1000, validation_data=(x_test, y_test), batch_size=64)
+    model.fit(
+        x_train,
+        y_train,
+        epochs=1000,
+        validation_data=(x_test, y_test),
+        batch_size=64,
+        callbacks=[TFKerasPruningCallback(trial, "val_acc")],
+    )
 
     score = model.evaluate(x_test, y_test)
     return score[1]
@@ -95,7 +102,12 @@ def objective(trial, data):
 
 if __name__ == "__main__":
     hourly_data = load_data()
-    study = optuna.create_study(direction="maximize")
+
+    study = optuna.create_study(
+        direction="maximize",
+        pruner=optuna.pruners.MedianPruner(2)
+    )
+
     optimization_function = partial(objective, data=hourly_data)
     study.optimize(optimization_function, n_trials=1000, timeout=604800)
 
