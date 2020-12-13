@@ -1,16 +1,22 @@
+import datetime
 import json
+import os
 from functools import partial
 
 import numpy as np
 import optuna
+import pandas as pd
 from optuna.integration import TFKerasPruningCallback
 from sklearn.model_selection import train_test_split
+from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping
+from tensorflow.python.keras.callbacks_v1 import TensorBoard
 from tensorflow.python.keras.layers import BatchNormalization, LSTM, Dropout, Dense
 from tensorflow.python.keras.models import Sequential
-import pandas as pd
 
 from preprocessing import slice_column
 
+CHECKPOINTS_PATH = 'checkpoints'
+LOGS_PATH = './logs'
 
 def label_up_down(window: np.array, label: float):
     """
@@ -51,12 +57,13 @@ def transform_data(data, windows_size, label_n):
 def load_data():
     data = pd.read_csv('EURUSD-2010_01_04-2020_11_27.csv')
     data.time = pd.to_datetime(data.time)
+    data = data[data.time < datetime.datetime(2020, 1, 1)]
     return data.drop(columns='time').diff().iloc[1:]
 
 
 def objective(trial, data):
 
-    window_size = trial.suggest_categorical("window_size", [6, 12, 24, 48, 56, 108])
+    window_size = trial.suggest_int("window_size", 6, 108)
 
     x_train, x_test, y_train, y_test = transform_data(data, window_size, 1)
 
@@ -66,13 +73,13 @@ def objective(trial, data):
         BatchNormalization()
     )
     model.add(
-        LSTM(trial.suggest_categorical("units_lstm", [32, 64, 128, 256, 516, 1032]), input_shape=(window_size, 4))
+        LSTM(trial.suggest_int("units_lstm", 32, 1032), input_shape=(window_size, 4))
     )
     model.add(
         Dropout(trial.suggest_float("dropout_lstm", 0.2, 0.6))
     )
     model.add(
-        Dense(trial.suggest_categorical("units_dense", [4, 8, 16, 32, 64, 128]))
+        Dense(trial.suggest_int("units_dense", 4, 128))
     )
     model.add(
         Dropout(trial.suggest_float("dropout_dense", 0.2, 0.6))
@@ -87,13 +94,25 @@ def objective(trial, data):
         metrics=['accuracy']
     )
 
+    early_stopping = EarlyStopping(
+        min_delta=0.0001,
+        patience=20,
+        baseline=None,
+    )
+
     model.fit(
         x_train,
         y_train,
-        epochs=1000,
+        epochs=2,
         validation_data=(x_test, y_test),
         batch_size=64,
-        callbacks=[TFKerasPruningCallback(trial, "val_acc")],
+        callbacks=[
+            TFKerasPruningCallback(trial, "val_acc"),
+            ReduceLROnPlateau(),
+            early_stopping,
+            TensorBoard(log_dir=LOGS_PATH),
+        ]
+
     )
 
     score = model.evaluate(x_test, y_test)
@@ -101,6 +120,10 @@ def objective(trial, data):
 
 
 if __name__ == "__main__":
+
+    if not os.path.exists(LOGS_PATH):
+        os.makedirs(LOGS_PATH)
+
     hourly_data = load_data()
 
     study = optuna.create_study(
@@ -109,7 +132,7 @@ if __name__ == "__main__":
     )
 
     optimization_function = partial(objective, data=hourly_data)
-    study.optimize(optimization_function, n_trials=1000, timeout=604800)
+    study.optimize(optimization_function, n_trials=1000)
 
     trial = study.best_trial
 
