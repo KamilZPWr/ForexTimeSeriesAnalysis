@@ -1,6 +1,6 @@
+import argparse
 import datetime
 import json
-import os
 from functools import partial
 
 import numpy as np
@@ -8,15 +8,12 @@ import optuna
 import pandas as pd
 from optuna.integration import TFKerasPruningCallback
 from sklearn.model_selection import train_test_split
-from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping
-from tensorflow.python.keras.callbacks_v1 import TensorBoard
+from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, CSVLogger
 from tensorflow.python.keras.layers import BatchNormalization, LSTM, Dropout, Dense
 from tensorflow.python.keras.models import Sequential
 
 from preprocessing import slice_column
 
-CHECKPOINTS_PATH = 'checkpoints'
-LOGS_PATH = './logs'
 
 def label_up_down(window: np.array, label: float):
     """
@@ -61,11 +58,11 @@ def load_data():
     return data.drop(columns='time').diff().iloc[1:]
 
 
-def objective(trial, data):
+def objective(trial, data, n=1):
 
     window_size = trial.suggest_int("window_size", 6, 108)
 
-    x_train, x_test, y_train, y_test = transform_data(data, window_size, 1)
+    x_train, x_test, y_train, y_test = transform_data(data, window_size, n)
 
     model = Sequential()
 
@@ -96,43 +93,41 @@ def objective(trial, data):
 
     early_stopping = EarlyStopping(
         min_delta=0.0001,
-        patience=20,
+        patience=13,
         baseline=None,
     )
+    csv_logger = CSVLogger(f'training_{n}.log', append=True)
 
     model.fit(
         x_train,
         y_train,
-        epochs=2,
+        epochs=1000,
         validation_data=(x_test, y_test),
-        batch_size=64,
+        batch_size=256,
         callbacks=[
             TFKerasPruningCallback(trial, "val_acc"),
             ReduceLROnPlateau(),
             early_stopping,
-            TensorBoard(log_dir=LOGS_PATH),
-        ]
-
+            csv_logger
+        ],
+        verbose=0
     )
 
     score = model.evaluate(x_test, y_test)
     return score[1]
 
 
-if __name__ == "__main__":
-
-    if not os.path.exists(LOGS_PATH):
-        os.makedirs(LOGS_PATH)
-
+def main(n):
     hourly_data = load_data()
 
     study = optuna.create_study(
         direction="maximize",
-        pruner=optuna.pruners.MedianPruner(2)
+        pruner=optuna.pruners.MedianPruner(2),
+        study_name=f'forex_predictor_{n}'
     )
 
-    optimization_function = partial(objective, data=hourly_data)
-    study.optimize(optimization_function, n_trials=1000)
+    optimization_function = partial(objective, data=hourly_data, n=n)
+    study.optimize(optimization_function, n_trials=100)
 
     trial = study.best_trial
 
@@ -142,7 +137,16 @@ if __name__ == "__main__":
         'trial_params': trial.params
     }
 
-    print(results)
-
-    with open('best_trial.json', 'w+') as file:
+    with open(f'best_trial_{n}.json', 'w+') as file:
         json.dump(results, file)
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('n', type=int)
+    args = parser.parse_args()
+
+    optuna.logging.set_verbosity(optuna.logging.INFO)
+
+    main(args.n)
