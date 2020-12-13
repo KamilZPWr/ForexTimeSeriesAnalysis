@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, CSVLogger
 from tensorflow.python.keras.layers import BatchNormalization, LSTM, Dropout, Dense
 from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from preprocessing import slice_column
 
@@ -85,8 +86,10 @@ def objective(trial, data, n=1):
         Dense(1, activation='relu')
     )
 
+    optimizer = Adam(learning_rate=0.0001, decay=0.000001)
+
     model.compile(
-        optimizer='adam',
+        optimizer=optimizer,
         loss='binary_crossentropy',
         metrics=['accuracy']
     )
@@ -103,7 +106,7 @@ def objective(trial, data, n=1):
         y_train,
         epochs=1000,
         validation_data=(x_test, y_test),
-        batch_size=256,
+        batch_size=128,
         callbacks=[
             TFKerasPruningCallback(trial, "val_acc"),
             ReduceLROnPlateau(),
@@ -122,7 +125,7 @@ def main(n):
 
     study = optuna.create_study(
         direction="maximize",
-        pruner=optuna.pruners.MedianPruner(2),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=30),
         study_name=f'forex_predictor_{n}'
     )
 
